@@ -1,1 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Enov Social - P2P</title>
+<script src="https://cdn.jsdelivr.net/npm/gun/gun.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/gun/sea.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/gun/axe.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Poppins', sans-serif; }
+  body { background: #000; color: #fff; overflow-x: hidden; }
+  h1, h2, h3, p { color: #fff; }
+  .center { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; }
 
+  /* Login / Signup */
+  #auth {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    background: #0a0a0a; height: 100vh;
+  }
+  #auth input {
+    background: #111; color: #fff; border: none; padding: 10px; margin: 5px;
+    border-radius: 6px; width: 220px;
+  }
+  #auth button {
+    background: #00d4ff; border: none; color: #000; padding: 10px 20px; margin-top: 10px;
+    cursor: pointer; font-weight: bold; border-radius: 8px;
+  }
+
+  /* Feed */
+  #app { display: none; }
+  .feed { height: 100vh; overflow-y: scroll; scroll-snap-type: y mandatory; }
+  .video-post {
+    position: relative; height: 100vh; scroll-snap-align: start;
+    display: flex; align-items: center; justify-content: center; background: #000;
+  }
+  video { width: 100%; height: 100%; object-fit: cover; }
+  .overlay {
+    position: absolute; bottom: 80px; left: 20px; max-width: 70%;
+  }
+  .overlay h3 { font-size: 18px; }
+  .overlay p { font-size: 14px; opacity: 0.8; }
+
+  .actions {
+    position: absolute; right: 15px; bottom: 80px;
+    display: flex; flex-direction: column; gap: 15px; align-items: center;
+  }
+  .actions button {
+    background: rgba(0, 0, 0, 0.6); border: none; color: white;
+    font-size: 20px; border-radius: 50%; padding: 10px; cursor: pointer;
+    transition: 0.3s;
+  }
+  .actions button:hover { transform: scale(1.2); background: #00d4ff; }
+
+  /* Upload */
+  #upload-section {
+    display: none; flex-direction: column; align-items: center; justify-content: center;
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    background: rgba(10,10,10,0.95);
+  }
+  #upload-section input, #upload-section textarea {
+    background: #111; color: #fff; border: 1px solid #333; padding: 10px; margin: 10px; width: 80%;
+  }
+  #upload-section button {
+    background: #00d4ff; color: #000; font-weight: bold; border: none;
+    padding: 10px 20px; border-radius: 8px; cursor: pointer;
+  }
+
+  /* Comments */
+  .comments {
+    position: absolute; bottom: 0; left: 0; right: 0;
+    background: rgba(0,0,0,0.8); padding: 10px; max-height: 40vh; overflow-y: auto;
+  }
+  .comment { margin-bottom: 8px; }
+  .reply { margin-left: 20px; color: #aaa; }
+
+  /* Navbar */
+  .navbar {
+    position: fixed; bottom: 0; left: 0; width: 100%;
+    background: rgba(20,20,20,0.95); display: flex; justify-content: space-around;
+    padding: 10px 0; border-top: 1px solid #222;
+  }
+  .navbar button {
+    background: none; border: none; color: #fff; font-size: 18px;
+    cursor: pointer; transition: 0.2s;
+  }
+  .navbar button:hover { color: #00d4ff; }
+
+</style>
+</head>
+<body>
+
+<!-- Login -->
+<div id="auth" class="center">
+  <h2>Enov Social</h2>
+  <p style="opacity:0.8">Peer-to-Peer Social Network</p>
+  <input type="text" id="username" placeholder="Username">
+  <input type="password" id="password" placeholder="Password">
+  <button onclick="signup()">Sign Up</button>
+  <button onclick="login()">Login</button>
+</div>
+
+<!-- Main App -->
+<div id="app">
+  <div class="feed" id="feed"></div>
+
+  <div id="upload-section">
+    <h2>Upload Video</h2>
+    <input type="file" id="videoUpload" accept="video/*">
+    <textarea id="caption" placeholder="Write a caption..."></textarea>
+    <button onclick="uploadVideo()">Upload</button>
+    <button onclick="toggleUpload(false)" style="margin-top:10px;">Cancel</button>
+  </div>
+
+  <div class="navbar">
+    <button onclick="scrollTopFeed()">🏠</button>
+    <button onclick="toggleUpload(true)">➕</button>
+    <button onclick="logout()">🚪</button>
+  </div>
+</div>
+
+<script>
+  // === Initialize GUN ===
+  const gun = Gun({
+    peers: ['https://gun-manhattan.herokuapp.com/gun'] // global relay for cross-device sync
+  });
+  const user = gun.user();
+  let currentUser = null;
+
+  // === Auth ===
+  function signup() {
+    const name = document.getElementById('username').value.trim();
+    const pass = document.getElementById('password').value;
+    user.create(name, pass, ack => {
+      if (ack.err) return alert(ack.err);
+      login();
+    });
+  }
+
+  function login() {
+    const name = document.getElementById('username').value.trim();
+    const pass = document.getElementById('password').value;
+    user.auth(name, pass, ack => {
+      if (ack.err) return alert(ack.err);
+      currentUser = name;
+      document.getElementById('auth').style.display = 'none';
+      document.getElementById('app').style.display = 'block';
+      loadFeed();
+    });
+  }
+
+  function logout() {
+    user.leave();
+    location.reload();
+  }
+
+  // === Upload ===
+  function toggleUpload(show) {
+    document.getElementById('upload-section').style.display = show ? 'flex' : 'none';
+  }
+
+  function uploadVideo() {
+    const file = document.getElementById('videoUpload').files[0];
+    const caption = document.getElementById('caption').value;
+    if (!file) return alert("Please select a video");
+    const url = URL.createObjectURL(file);
+    const postId = Date.now().toString();
+    gun.get('posts').get(postId).put({
+      user: currentUser,
+      video: url,
+      caption: caption,
+      likes: 0,
+      timestamp: new Date().toISOString()
+    });
+    toggleUpload(false);
+  }
+
+  // === Feed ===
+  const feed = document.getElementById('feed');
+  function loadFeed() {
+    gun.get('posts').map().on((data, id) => {
+      if (!data || document.getElementById(id)) return;
+      const post = document.createElement('div');
+      post.className = 'video-post';
+      post.id = id;
+      post.innerHTML = `
+        <video src="${data.video}" autoplay muted loop></video>
+        <div class="overlay">
+          <h3>@${data.user}</h3>
+          <p>${data.caption}</p>
+        </div>
+        <div class="actions">
+          <button onclick="likePost('${id}')">❤️</button>
+          <button onclick="openComments('${id}')">💬</button>
+        </div>
+      `;
+      feed.prepend(post);
+    });
+  }
+
+  function scrollTopFeed() {
+    feed.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  // === Likes ===
+  function likePost(id) {
+    const post = gun.get('posts').get(id);
+    post.once(data => {
+      const likes = (data.likes || 0) + 1;
+      post.put({ likes });
+      alert(`Liked! Total likes: ${likes}`);
+    });
+  }
+
+  // === Comments ===
+  function openComments(postId) {
+    let container = document.querySelector(`#${postId} .comments`);
+    if (container) {
+      container.remove();
+      return;
+    }
+    container = document.createElement('div');
+    container.className = 'comments';
+    container.innerHTML = `
+      <div id="comment-list-${postId}"></div>
+      <input id="comment-input-${postId}" placeholder="Add a comment..." style="width:80%;padding:5px;">
+      <button onclick="addComment('${postId}')">Post</button>
+    `;
+    document.getElementById(postId).appendChild(container);
+
+    gun.get('posts').get(postId).get('comments').map().on((data, cid) => {
+      if (!data) return;
+      const commentList = document.getElementById(`comment-list-${postId}`);
+      if (!document.getElementById(cid)) {
+        const c = document.createElement('div');
+        c.className = 'comment';
+        c.id = cid;
+        c.innerHTML = `<b>@${data.user}:</b> ${data.text}`;
+        commentList.appendChild(c);
+      }
+    });
+  }
+
+  function addComment(postId) {
+    const input = document.getElementById(`comment-input-${postId}`);
+    const text = input.value.trim();
+    if (!text) return;
+    const commentId = Date.now().toString();
+    gun.get('posts').get(postId).get('comments').get(commentId).put({
+      user: currentUser,
+      text: text
+    });
+    input.value = '';
+  }
+
+</script>
+</body>
+</html>
